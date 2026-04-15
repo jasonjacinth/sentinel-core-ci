@@ -1,0 +1,258 @@
+// ============================================================================
+// TRADITIONAL Jenkinsfile — Before the Shared Library
+//
+// This is the FULL declarative pipeline that every application team had to
+// copy-paste, maintain, and debug independently.  Changes to the pipeline
+// required PRs across dozens of repos.
+//
+// Total lines: 210+
+// ============================================================================
+
+pipeline {
+    agent any
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Environment variables
+    // ────────────────────────────────────────────────────────────────────────
+    environment {
+        APP_NAME        = 'order-service'
+        APP_PORT        = '8080'
+        DEPLOY_ENV      = 'staging'
+        DOCKER_REGISTRY = 'registry.example.com'
+        IMAGE_NAME      = "${DOCKER_REGISTRY}/${APP_NAME}"
+        IMAGE_TAG       = "${BUILD_NUMBER}"
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Pipeline options
+    // ────────────────────────────────────────────────────────────────────────
+    options {
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    stages {
+        // ====================================================================
+        // STAGE 0: Pre-flight Environment Validation
+        // ====================================================================
+        stage('Pre-flight Validation') {
+            steps {
+                script {
+                    echo 'Running pre-flight environment validation...'
+
+                    // Inline validation — no shared script, duplicated everywhere
+                    def requiredVars = [
+                        'APP_NAME',
+                        'APP_PORT',
+                        'DEPLOY_ENV',
+                        'DOCKER_REGISTRY',
+                        'DOCKER_USER',
+                        'DOCKER_PASS',
+                        'DEPLOY_HOST',
+                    ]
+
+                    def missing = []
+                    for (varName in requiredVars) {
+                        def val = env."${varName}"
+                        if (!val || val.trim() == '') {
+                            missing.add(varName)
+                        }
+                    }
+
+                    if (missing.size() > 0) {
+                        echo "Missing environment variables: ${missing}"
+                        echo '   Please configure these in Jenkins Credentials or'
+                        echo '   the job configuration before running this pipeline.'
+                        error "Pre-flight validation failed: ${missing.size()} variable(s) missing."
+                    }
+
+                    echo 'All required environment variables are present.'
+                }
+            }
+        }
+
+        // ====================================================================
+        // STAGE 1: Checkout
+        // ====================================================================
+        stage('Checkout') {
+            steps {
+                echo "Checking out source code..."
+                checkout scm
+                echo "Checkout complete."
+            }
+        }
+
+        // ====================================================================
+        // STAGE 2: Build
+        // ====================================================================
+        stage('Build') {
+            steps {
+                echo "Building ${env.APP_NAME}..."
+                echo "   Command: ./gradlew clean build"
+                sh './gradlew clean build'
+                echo "Build completed for ${env.APP_NAME}"
+            }
+        }
+
+        // ====================================================================
+        // STAGE 3: Unit Tests
+        // ====================================================================
+        stage('Unit Tests') {
+            steps {
+                echo "Running unit tests for ${env.APP_NAME}..."
+                sh './gradlew test'
+                echo "Unit tests passed."
+            }
+            post {
+                always {
+                    echo "Archiving test results..."
+                    junit allowEmptyResults: true,
+                         testResults: '**/build/test-results/**/*.xml'
+                }
+            }
+        }
+
+        // ====================================================================
+        // STAGE 4: Code Quality / Static Analysis (often duplicated)
+        // ====================================================================
+        stage('Code Quality') {
+            steps {
+                echo "Running static analysis..."
+                // Teams often copy-paste sonar/checkstyle config here
+                sh './gradlew checkstyleMain || true'
+                echo "Code quality checks finished."
+            }
+        }
+
+        // ====================================================================
+        // STAGE 5: Build Docker Image
+        // ====================================================================
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+                sh "docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} -f Dockerfile ."
+                echo "Docker image built."
+            }
+        }
+
+        // ====================================================================
+        // STAGE 6: Push Docker Image
+        // ====================================================================
+        stage('Push Docker Image') {
+            steps {
+                echo "Pushing Docker image to ${env.DOCKER_REGISTRY}..."
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'docker-registry-credentials',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    sh """
+                        echo \$DOCKER_PASS | docker login ${env.DOCKER_REGISTRY} \
+                            -u \$DOCKER_USER --password-stdin
+                    """
+                    sh "docker push ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+                }
+                echo "Image pushed: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+            }
+        }
+
+        // ====================================================================
+        // STAGE 7: Deploy to Target Environment
+        // ====================================================================
+        stage('Deploy') {
+            steps {
+                echo "Deploying ${env.APP_NAME} to ${env.DEPLOY_ENV}..."
+                withCredentials([
+                    string(credentialsId: 'deploy-host-ip', variable: 'DEPLOY_HOST')
+                ]) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no deployer@\$DEPLOY_HOST << 'ENDSSH'
+                            echo "Pulling image..."
+                            docker pull ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+
+                            echo "Stopping old container..."
+                            docker stop ${env.APP_NAME}-${env.DEPLOY_ENV} || true
+                            docker rm   ${env.APP_NAME}-${env.DEPLOY_ENV} || true
+
+                            echo "Starting new container..."
+                            docker run -d \\
+                                --name ${env.APP_NAME}-${env.DEPLOY_ENV} \\
+                                -p ${env.APP_PORT}:${env.APP_PORT} \\
+                                --restart unless-stopped \\
+                                ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+
+                            echo "Verifying container is running..."
+                            sleep 5
+                            docker ps | grep ${env.APP_NAME}-${env.DEPLOY_ENV}
+                        ENDSSH
+                    """
+                }
+                echo "Deployment complete."
+            }
+        }
+
+        // ====================================================================
+        // STAGE 8: Smoke Test
+        // ====================================================================
+        stage('Smoke Test') {
+            steps {
+                echo "Running post-deploy smoke test..."
+                withCredentials([
+                    string(credentialsId: 'deploy-host-ip', variable: 'DEPLOY_HOST')
+                ]) {
+                    sh """
+                        echo "Waiting for app to start..."
+                        sleep 10
+                        HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \
+                            http://\$DEPLOY_HOST:${env.APP_PORT}/health)
+                        if [ "\$HTTP_CODE" != "200" ]; then
+                            echo "Health check failed (HTTP $HTTP_CODE)"
+                            exit 1
+                        fi
+                        echo "Health check passed (HTTP $HTTP_CODE)"
+                    """
+                }
+            }
+        }
+
+        // ====================================================================
+        // STAGE 9: Tag Release (often duplicated with slight variations)
+        // ====================================================================
+        stage('Tag Release') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo "Tagging release v${env.IMAGE_TAG}..."
+                sh """
+                    git tag -a "v${env.IMAGE_TAG}" -m "Release v${env.IMAGE_TAG}"
+                    git push origin "v${env.IMAGE_TAG}"
+                """
+                echo "Release tagged."
+            }
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Post-pipeline actions
+    // ────────────────────────────────────────────────────────────────────────
+    post {
+        success {
+            echo "Pipeline SUCCESS: ${env.APP_NAME}:${env.IMAGE_TAG} deployed to ${env.DEPLOY_ENV}"
+        }
+        failure {
+            echo "Pipeline FAILED: ${env.APP_NAME} on ${env.DEPLOY_ENV}."
+            echo "   Review the stage logs above to identify the failure."
+            // Teams often paste Slack / email notifications here too
+            // slackSend channel: '#deploys', color: 'danger',
+            //     message: "FAILED: ${env.APP_NAME} build ${env.BUILD_NUMBER}"
+        }
+        always {
+            echo 'Cleaning up workspace...'
+            cleanWs()
+        }
+    }
+}

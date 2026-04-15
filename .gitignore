@@ -1,0 +1,34 @@
+# ──────────────────────────────────────────────────────────────
+# Jenkins Shared Library — .gitignore
+# ──────────────────────────────────────────────────────────────
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+
+# Groovy / Java build artifacts (if any)
+build/
+*.class
+*.jar
+
+# Logs
+*.log
+
+# AI / coding assistant configuration
+# Skill files are used locally during development but must not be committed.
+.agents/

@@ -1,0 +1,19 @@
+// ──────────────────────────────────────────────────────────────
+// Consumer Jenkinsfile — this is ALL an application team needs.
+// Place this file in the root of your application repository.
+//
+// Lines of code: 13  (down from ~200+ with raw declarative)
+// ──────────────────────────────────────────────────────────────
+@Library('jenkins-shared-lib') _
+
+standardMicroservicePipeline(
+    appName:        'order-service',
+    appPort:         8080,
+    deployEnv:      'staging',
+    dockerRegistry: 'registry.example.com',
+    // Optional overrides (uncomment to customise):
+    // buildCmd:       'mvn clean package -DskipTests',
+    // testCmd:        'mvn test',
+    // dockerfilePath: 'docker/Dockerfile',
+    // imageTag:       'v2.1.0',
+)
