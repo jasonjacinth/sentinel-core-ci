@@ -4,7 +4,7 @@
 //
 // Lines of code: 13  (down from ~200+ with raw declarative)
 // ──────────────────────────────────────────────────────────────
-@Library('jenkins-shared-lib') _
+@Library('sentinel-core-ci') _
 
 standardMicroservicePipeline(
     appName:        'order-service',

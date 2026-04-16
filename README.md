@@ -1,13 +1,13 @@
-# Jenkins Shared Library — Microservice Pipeline Templates
+# Sentinel Core CI — Microservice Pipeline Templates
 
-A centralized Jenkins Shared Library that standardizes CI/CD workflows across application teams. Complex pipeline logic is abstracted into a single declarative wrapper, paired with Python-based pre-flight validation to ensure environment integrity.
+A centralized Sentinel Core CI library that standardizes CI/CD workflows across application teams. Complex pipeline logic is abstracted into a single declarative wrapper, paired with Python-based pre-flight validation to ensure environment integrity.
 
 ---
 
 ## Repository Structure
 
 ```text
-jenkins-shared-lib/
+sentinel-core-ci/
 ├── vars/
 │   ├── standardMicroservicePipeline.groovy   # Main pipeline wrapper
 │   ├── buildApp.groovy                       # Build stage
@@ -36,17 +36,17 @@ Go to **Manage Jenkins → System → Global Pipeline Libraries** and add:
 
 | Field              | Value                                          |
 |--------------------|------------------------------------------------|
-| **Name**           | `jenkins-shared-lib`                           |
+| **Name**           | `sentinel-core-ci`                             |
 | **Default Version**| `main`                                         |
 | **Retrieval**      | Modern SCM → Git                               |
-| **Project URL**    | `https://github.com/<org>/jenkins-shared-lib`  |
+| **Project URL**    | `https://github.com/<org>/sentinel-core-ci`    |
 
 ### 2. Create a Consumer Jenkinsfile
 
 In the root of your application repository, create a `Jenkinsfile`:
 
 ```groovy
-@Library('jenkins-shared-lib') _
+@Library('sentinel-core-ci') _
 
 standardMicroservicePipeline(
     appName:        'order-service',

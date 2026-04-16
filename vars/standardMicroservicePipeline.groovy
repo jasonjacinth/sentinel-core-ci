@@ -6,7 +6,7 @@
  * to get a complete build → test → containerize → deploy workflow.
  *
  * Usage (in a consumer Jenkinsfile):
- *   @Library('jenkins-shared-lib') _
+ *   @Library('sentinel-core-ci') _
  *   standardMicroservicePipeline(
  *       appName:       'my-service',
  *       appPort:        8080,
