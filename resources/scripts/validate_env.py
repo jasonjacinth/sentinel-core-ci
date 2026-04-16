@@ -65,6 +65,7 @@ REQUIRED_VARS = [
 
 def validate(required_vars: list[dict]) -> dict:
     """Check every entry in *required_vars* against the live environment.
+    This ensures pipeline integrity by failing fast if configs are missing.
 
     Returns a results dict:
         {
