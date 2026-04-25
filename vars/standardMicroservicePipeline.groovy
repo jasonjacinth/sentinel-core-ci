@@ -140,6 +140,20 @@ def call(Map config = [:]) {
                     }
                 }
             }
+
+            // -----------------------------------------------------------------
+            // Stage 5 — Post-deploy Verification (Python)
+            // -----------------------------------------------------------------
+            stage('Post-deploy Verification') {
+                steps {
+                    script {
+                        echo "Running post-deploy verification..."
+                        def verifyScript = libraryResource('scripts/verify_deploy.py')
+                        writeFile file: 'verify_deploy.py', text: verifyScript
+                        sh 'python3 verify_deploy.py'
+                    }
+                }
+            }
         }
 
         // ---------------------------------------------------------------------

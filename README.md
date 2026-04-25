@@ -1,6 +1,6 @@
-# Sentinel Core CI — Microservice Pipeline Templates
+# Sentinel Core CI -- Microservice Pipeline Templates
 
-A centralized Sentinel Core CI library that standardizes CI/CD workflows across application teams. Complex pipeline logic is abstracted into a single declarative wrapper, paired with Python-based pre-flight validation to ensure environment integrity.
+A centralized Sentinel Core CI library that standardizes CI/CD workflows across application teams. Complex pipeline logic is abstracted into a single declarative wrapper, paired with Python-based pre-flight and post-deploy validation to ensure environment integrity and deployment health.
 
 ---
 
@@ -16,12 +16,14 @@ sentinel-core-ci/
 │   └── deployApp.groovy                      # Deployment stage
 ├── resources/
 │   └── scripts/
-│       └── validate_env.py                   # Pre-flight env validation
+│       ├── validate_env.py                   # Pre-flight env validation
+│       └── verify_deploy.py                  # Post-deploy verification
 ├── tests/
-│   └── test_validate_env.py                  # Unit tests (11 tests)
+│   ├── test_validate_env.py                  # Pre-flight tests (11 tests)
+│   └── test_verify_deploy.py                 # Post-deploy tests (18 tests)
 ├── examples/
 │   ├── Jenkinsfile                           # Optimized consumer (<20 lines)
-│   └── Jenkinsfile.traditional               # Traditional comparison (258 lines)
+│   └── Jenkinsfile.traditional               # Traditional comparison (304 lines)
 ├── src/                                      # Reserved for future use
 └── README.md
 ```
@@ -116,28 +118,68 @@ python3 resources/scripts/validate_env.py
 
 ---
 
+## Post-deploy Verification
+
+The Python verification script (`resources/scripts/verify_deploy.py`) runs as the **final pipeline stage** after deployment. It confirms the newly deployed container is healthy before the pipeline reports success.
+
+### Checks Performed
+
+| Check              | Method                          | Pass Condition                |
+|--------------------|---------------------------------|-------------------------------|
+| Environment vars   | `os.environ` lookup             | All 4 required vars set       |
+| Container status   | SSH + `docker inspect`          | Container state is "running"  |
+| HTTP health probe  | `GET /health` via `urllib`      | HTTP 200 response             |
+
+### Variables Required
+
+| Variable      | Description                              |
+|---------------|------------------------------------------|
+| `APP_NAME`    | Application / service name               |
+| `APP_PORT`    | Port the application listens on          |
+| `DEPLOY_ENV`  | Target deployment environment            |
+| `DEPLOY_HOST` | Target host IP or hostname               |
+
+If any check fails, the script exits with code `1` and the pipeline **reports a failed deployment**.
+
+### Local Testing
+
+```bash
+# All vars set (requires SSH access and a running container)
+APP_NAME=order-service APP_PORT=8080 DEPLOY_ENV=staging DEPLOY_HOST=10.0.0.1 \
+python3 resources/scripts/verify_deploy.py
+
+# No vars set -> should fail with exit code 1
+python3 resources/scripts/verify_deploy.py
+```
+
+---
+
 ## Pipeline Stages
 
 ```text
-┌──────────────────────┐
-│ Pre-flight Validation│  ← Python env check
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│       Build          │  ← buildApp.groovy
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│       Test           │  ← testApp.groovy
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│ Build & Push Image   │  ← buildAndPushContainer.groovy
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│       Deploy         │  ← deployApp.groovy
-└──────────┘───────────┘
+┌──────────────────────────┐
+│  Pre-flight Validation   │  <- validate_env.py
+└────────────┬─────────────┘
+             v
+┌──────────────────────────┐
+│          Build           │  <- buildApp.groovy
+└────────────┬─────────────┘
+             v
+┌──────────────────────────┐
+│          Test            │  <- testApp.groovy
+└────────────┬─────────────┘
+             v
+┌──────────────────────────┐
+│   Build & Push Image     │  <- buildAndPushContainer.groovy
+└────────────┬─────────────┘
+             v
+┌──────────────────────────┐
+│         Deploy           │  <- deployApp.groovy
+└────────────┬─────────────┘
+             v
+┌──────────────────────────┐
+│ Post-deploy Verification │  <- verify_deploy.py
+└──────────────────────────┘
 ```
 
 ---
@@ -157,8 +199,8 @@ Configure these in **Manage Jenkins → Credentials**:
 
 | Metric                      | Traditional              | Shared Library           | Improvement     |
 |-----------------------------|--------------------------|--------------------------|------------------|
-| Total lines per Jenkinsfile | 258                      | 19                       | **92.6%**       |
-| Effective code lines        | 184                      | 7                        | **96.2%**       |
+| Total lines per Jenkinsfile | 304                      | 19                       | **93.8%**       |
+| Effective code lines        | 218                      | 7                        | **96.8%**       |
 | Pipeline logic locations    | N repos (copy-paste)     | 1 centralized repo       | Centralized     |
 | Time to onboard new app     | Hours                    | Minutes                  | **~90%**        |
 
@@ -168,20 +210,35 @@ Configure these in **Manage Jenkins → Credentials**:
 
 ## Testing
 
-Run the Python validation unit tests locally (no Jenkins required):
+Run all unit tests locally (no Jenkins required):
 
 ```bash
-# Run all 11 tests
+# Run pre-flight validation tests (11 tests)
 python3 -m unittest tests.test_validate_env -v
+
+# Run post-deploy verification tests (18 tests)
+python3 -m unittest tests.test_verify_deploy -v
 ```
+
+### Pre-flight Validation Tests (test_validate_env.py)
 
 | Test Category    | Count | Coverage |
 |------------------|-------|----------|
-| Happy path       | 1     | All vars present → pass |
+| Happy path       | 1     | All vars present -> pass |
 | Failure paths    | 4     | Missing, empty, whitespace, single missing |
 | Result structure | 3     | Keys, totals, arithmetic |
 | Custom input     | 1     | Arbitrary var lists |
 | Exit codes       | 2     | `sys.exit(0)` / `sys.exit(1)` |
+
+### Post-deploy Verification Tests (test_verify_deploy.py)
+
+| Test Category       | Count | Coverage |
+|---------------------|-------|----------|
+| Env var checking    | 4     | All present, all missing, single missing, whitespace |
+| Container checks    | 4     | Running, exited, SSH failure, timeout |
+| Health probes       | 3     | HTTP 200, HTTP 503, unreachable |
+| Verify orchestrator | 5     | All pass, env skip, container down, keys, arithmetic |
+| Exit codes          | 2     | `sys.exit(0)` / `sys.exit(1)` |
 
 ---
 

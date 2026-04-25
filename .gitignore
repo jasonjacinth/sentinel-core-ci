@@ -32,3 +32,6 @@ build/
 # AI / coding assistant configuration
 # Skill files are used locally during development but must not be committed.
 .agents/
+
+# Personal project reference
+walkthrough.md

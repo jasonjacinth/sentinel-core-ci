@@ -234,6 +234,52 @@ pipeline {
                 echo "Release tagged."
             }
         }
+
+        // ====================================================================
+        // STAGE 10: Post-deploy Verification (duplicated inline)
+        // ====================================================================
+        stage('Post-deploy Verification') {
+            steps {
+                echo 'Running post-deploy verification...'
+                withCredentials([
+                    string(credentialsId: 'deploy-host-ip', variable: 'DEPLOY_HOST')
+                ]) {
+                    script {
+                        // Check container is running
+                        echo "Checking container status on ${env.DEPLOY_HOST}..."
+                        def containerStatus = sh(
+                            script: """
+                                ssh -o StrictHostKeyChecking=no deployer@\$DEPLOY_HOST \
+                                    "docker inspect -f '{{.State.Status}}' ${env.APP_NAME}-${env.DEPLOY_ENV}"
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        if (containerStatus != 'running') {
+                            error "Container ${env.APP_NAME}-${env.DEPLOY_ENV} is not running (status: ${containerStatus})"
+                        }
+                        echo "Container is running."
+
+                        // HTTP health check
+                        echo "Probing health endpoint..."
+                        def httpCode = sh(
+                            script: """
+                                curl -s -o /dev/null -w "%{http_code}" \
+                                    --connect-timeout 10 \
+                                    http://\$DEPLOY_HOST:${env.APP_PORT}/health
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        if (httpCode != '200') {
+                            error "Health check failed (HTTP ${httpCode})"
+                        }
+                        echo "Health check passed (HTTP ${httpCode})"
+                    }
+                }
+                echo 'Post-deploy verification complete.'
+            }
+        }
     }
 
     // ────────────────────────────────────────────────────────────────────────
